@@ -1,0 +1,26 @@
+# env
+.env
+
+# node
+frontend/node_modules
+frontend/dist
+frontend/tsconfig.tsbuildinfo
+
+# python
+backend/venv
+backend/__pycache__
+backend/**/__pycache__
+*.pyc
+
+# uploads (keep the folder, not the contents)
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# sqlite fallback (local dev without Docker)
+*.db
+*.sqlite
+*.sqlite3
+backend/warrantyos.db
+
+# os
+.DS_Store
