@@ -1,0 +1,10 @@
+{
+  "buildCommand": "cd warrantyos/frontend && npm install && npm run build",
+  "outputDirectory": "warrantyos/frontend/dist",
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

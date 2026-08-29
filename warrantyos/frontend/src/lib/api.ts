@@ -4,7 +4,9 @@
  * attachment logic once /api/auth exists.
  */
 
-const BASE = "/api";
+const BASE = ((import.meta as any).env?.VITE_API_URL as string) || "/api";
+
+
 
 export class ApiError extends Error {
   status: number;
