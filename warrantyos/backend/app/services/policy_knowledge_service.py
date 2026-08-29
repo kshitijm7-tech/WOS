@@ -147,3 +147,30 @@ def retrieve_policy_knowledge(db: Session, claim: Claim, top_k: int = 5) -> List
     # Sort by relevance desc, deterministic tie-break by policy_id
     scored.sort(key=lambda x: (-x.relevance, x.policy_id))
     return scored[:top_k]
+
+
+from abc import ABC, abstractmethod
+
+
+class PolicyRetriever(ABC):
+    @abstractmethod
+    def retrieve(self, db: Session, claim: Claim, top_k: int = 5) -> List[PolicyKnowledgeItem]:
+        """Retrieve relevant policy items with matched_terms and traceability reason."""
+        ...
+
+
+class KeywordPolicyRetriever(PolicyRetriever):
+    def retrieve(self, db: Session, claim: Claim, top_k: int = 5) -> List[PolicyKnowledgeItem]:
+        return retrieve_policy_knowledge(db, claim, top_k=top_k)
+
+
+class VectorPolicyRetriever(PolicyRetriever):
+    def retrieve(self, db: Session, claim: Claim, top_k: int = 5) -> List[PolicyKnowledgeItem]:
+        # For Part 2.6, falls back to keyword retrieval to remain offline and deterministic
+        return retrieve_policy_knowledge(db, claim, top_k=top_k)
+
+
+def get_policy_retriever() -> PolicyRetriever:
+    return KeywordPolicyRetriever()
+
+

@@ -20,6 +20,7 @@ class EvidenceItem(BaseModel):
 
 
 class ExtractedDocument(BaseModel):
+    document_type: Optional[str] = "INVOICE"
     invoice_number: Optional[str] = None
     purchase_date: Optional[date] = None
     seller: Optional[str] = None
@@ -28,6 +29,8 @@ class ExtractedDocument(BaseModel):
     amount: Optional[float] = None
     customer_name: Optional[str] = None
     extraction_confidence: float = Field(default=0.0, ge=0, le=1)
+    field_confidence: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+    warnings: List[str] = Field(default_factory=list)
     source: str = "mock"  # mock | ocr | manual
     raw_fields: Dict[str, Any] = Field(default_factory=dict)
 
@@ -65,8 +68,11 @@ class HistoricalCaseOut(BaseModel):
     evidence_profile: Optional[str] = None
     summary: Optional[str] = None
     similarity_score: Optional[float] = None
+    semantic_score: Optional[float] = None
+    structured_score: Optional[float] = None
     matched_features: Optional[List[str]] = None
     relevance_reason: Optional[str] = None
+
 
     class Config:
         from_attributes = True

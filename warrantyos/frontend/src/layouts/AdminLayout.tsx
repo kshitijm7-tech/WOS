@@ -5,7 +5,9 @@ import { useAuth } from "../lib/auth";
 const nav = [
   { to: "/admin/dashboard", label: "Dashboard" },
   { to: "/admin/claims", label: "Claims Queue" },
+  { to: "/admin/ai-intelligence", label: "AI Intelligence" },
 ];
+
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();

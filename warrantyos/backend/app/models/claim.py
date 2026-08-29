@@ -149,9 +149,47 @@ class AIExecution(Base):
     duration_ms = Column(Integer, nullable=True)
     error_code = Column(String(50), nullable=True)
     error_message = Column(Text, nullable=True)
+    input_token_count = Column(Integer, nullable=True)
+    output_token_count = Column(Integer, nullable=True)
+    estimated_cost = Column(Numeric(8, 4), nullable=True, default=0.0)
+    latency_ms = Column(Integer, nullable=True)
+    provider_status = Column(String(50), nullable=True)
+    fallback_used = Column(Boolean, default=False)
+    fallback_reason = Column(String(255), nullable=True)
+    failure_class = Column(String(50), nullable=True)
+    requested_provider = Column(String(50), nullable=True)
+    actual_provider = Column(String(50), nullable=True)
+    requested_model = Column(String(100), nullable=True)
+    actual_model = Column(String(100), nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    stages = relationship("AIExecutionStage", backref="execution", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("idx_ai_executions_claim_status", "claim_id", "status"),
         Index("idx_ai_executions_execution_id", "execution_id"),
     )
+
+
+class AIExecutionStage(Base):
+    __tablename__ = "ai_execution_stages"
+    id = Column(Integer, primary_key=True)
+    ai_execution_id = Column(Integer, ForeignKey("ai_executions.id"), nullable=False, index=True)
+    stage_name = Column(String(50), nullable=False)
+    status = Column(String(30), nullable=False)  # COMPLETED|FAILED|TIMED_OUT|SKIPPED
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    duration_ms = Column(Integer, nullable=True)
+    error_code = Column(String(50), nullable=True)
+    error_message = Column(Text, nullable=True)
+    provider = Column(String(50), nullable=True)
+    model = Column(String(100), nullable=True)
+    metadata_json = Column(JSONB().with_variant(JSON(), "sqlite"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_ai_execution_stages_execution", "ai_execution_id"),
+        Index("idx_ai_execution_stages_name", "ai_execution_id", "stage_name"),
+    )
+

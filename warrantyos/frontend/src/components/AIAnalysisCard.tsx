@@ -123,6 +123,17 @@ export default function AIAnalysisCard({ analysis, onStart }: { analysis: AIAnal
             </div>
           )}
           <p className="text-xs text-slate-light">Model: {d.model || "mock"} · v{d.decision_version || 1} · {analysis.stages.length} stages {d.explanation?.historical_case_references?.length ? `· ${d.explanation.historical_case_references.length} similar cases` : ""}</p>
+          <div className="mt-2 text-xs text-slate-light border-t border-line pt-2">
+            <p className="font-semibold">Intelligence Sources</p>
+            <ul className="list-disc pl-4 mt-1">
+              <li>Evidence: {d.evidence.length} items {d.missing_information.length ? `· Missing: ${d.missing_information.slice(0,2).join(", ")}` : "· Complete"}</li>
+              <li>Policy: {d.explanation?.policy_references?.length || 0} references</li>
+              <li>Historical: {d.explanation?.historical_case_references?.length || 0} similar cases</li>
+              <li>Risk: {d.risk_flags.length} signals</li>
+              <li>OCR: {d.model === "mock" ? "Mock extraction" : "Real OCR"} · Confidence {d.confidence.toFixed(2)}</li>
+            </ul>
+            <p className="mt-2 font-mono">Provider: {d.model?.includes("mock") ? "Mock" : d.model} · Pipeline: 2.5 · Governance Score: {d.decision_score?.toFixed(3) || "—"}</p>
+          </div>
           {analysis.stages.length > 0 && (
             <details className="mt-2">
               <summary className="text-xs text-teal cursor-pointer">Show 6 stage outputs</summary>

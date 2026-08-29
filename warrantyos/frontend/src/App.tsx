@@ -13,6 +13,7 @@ import NewClaim from "./pages/NewClaim";
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminClaims from "./pages/AdminClaims";
 import AdminClaimDetail from "./pages/AdminClaimDetail";
+import AdminAIIntelligence from "./pages/AdminAIIntelligence";
 
 export default function App() {
   return (
@@ -97,6 +98,15 @@ export default function App() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/admin/ai-intelligence"
+        element={
+          <ProtectedRoute role="admin">
+            <AdminAIIntelligence />
+          </ProtectedRoute>
+        }
+      />
+
       <Route
         path="/admin/reviews"
         element={

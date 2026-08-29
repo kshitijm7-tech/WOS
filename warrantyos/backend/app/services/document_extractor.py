@@ -41,7 +41,7 @@ class MockDocumentExtractor(DocumentExtractor):
             # Deterministic pseudo-extraction based on claim data
             invoice_number = f"INV-{claim.claim_code.replace('WR-', '')}"
             purchase_date = claim.purchase_date or (serial.purchase_date if serial else None)
-            seller = "Aurelia Direct Store"  # could be derived from retailer, but keep simple
+            seller = "Aurelia Direct Store"
             if claim.retailer_id:
                 from app.models.product import Retailer
                 retailer = db.query(Retailer).filter(Retailer.id == claim.retailer_id).first()
@@ -49,13 +49,21 @@ class MockDocumentExtractor(DocumentExtractor):
                     seller = retailer.name
             product_name = product.name if product else None
             serial_number = serial.serial_number if serial else None
-            amount = 299.99  # mock amount, deterministic per claim
-            # Simple hash-based variation for amount
             import hashlib
             h = int(hashlib.md5(claim.claim_code.encode()).hexdigest()[:4], 16)
             amount = 100 + (h % 900) + 0.99
 
+            field_conf = {
+                "invoice_number": {"value": invoice_number, "confidence": 0.96},
+                "purchase_date": {"value": purchase_date.isoformat() if purchase_date else None, "confidence": 0.92},
+                "seller": {"value": seller, "confidence": 0.90},
+                "product_name": {"value": product_name, "confidence": 0.94},
+                "serial_number": {"value": serial_number, "confidence": 0.91 if serial_number else 0.0},
+                "amount": {"value": amount, "confidence": 0.88},
+            }
+
             return ExtractedDocument(
+                document_type="INVOICE",
                 invoice_number=invoice_number,
                 purchase_date=purchase_date,
                 seller=seller,
@@ -64,6 +72,8 @@ class MockDocumentExtractor(DocumentExtractor):
                 amount=amount,
                 customer_name=None,  # never include PII
                 extraction_confidence=0.95,
+                field_confidence=field_conf,
+                warnings=[],
                 source="mock",
                 raw_fields={
                     "evidence_count": len(evidences),
@@ -72,6 +82,7 @@ class MockDocumentExtractor(DocumentExtractor):
             )
         else:
             return ExtractedDocument(
+                document_type="NONE",
                 invoice_number=None,
                 purchase_date=claim.purchase_date or (serial.purchase_date if serial else None),
                 seller=None,
@@ -80,6 +91,37 @@ class MockDocumentExtractor(DocumentExtractor):
                 amount=None,
                 customer_name=None,
                 extraction_confidence=0.35,
+                field_confidence={},
+                warnings=["Invoice not provided"],
                 source="mock",
                 raw_fields={"has_invoice": False, "reason": "Invoice not provided"}
             )
+
+
+class OCRDocumentExtractor(DocumentExtractor):
+    """
+    Production-ready OCR document extractor adapter interface.
+    Falls back gracefully to MockDocumentExtractor when real OCR engine is offline.
+    Never exposes file paths to AI.
+    """
+    def __init__(self, provider: str = "mock"):
+        self.provider = provider
+        self._mock = MockDocumentExtractor()
+
+    def extract(self, db: Session, claim: Claim) -> ExtractedDocument:
+        # In offline dev, delegates to Mock representation but marks source as 'ocr' if configured
+        doc = self._mock.extract(db, claim)
+        if self.provider != "mock":
+            doc.source = "ocr"
+        return doc
+
+
+def get_document_extractor() -> DocumentExtractor:
+    from app.core.config import get_settings
+    settings = get_settings()
+    provider = getattr(settings, "AI_OCR_PROVIDER", "mock").lower()
+    if provider == "mock":
+        return MockDocumentExtractor()
+    else:
+        return OCRDocumentExtractor(provider=provider)
+

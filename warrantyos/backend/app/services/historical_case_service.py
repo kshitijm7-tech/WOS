@@ -1,7 +1,8 @@
 """
-Historical Case Intelligence — Part 2.2
-Deterministic retrieval without embeddings/pgvector.
-Uses HistoricalCase table (seeded corpus) and weighted similarity.
+Historical Case Intelligence — Part 2.2/2.5
+Deterministic retrieval by default, with optional semantic retrieval via EmbeddingProvider + VectorStore.
+Hybrid: semantic 50% + structured 50% when vector store available, else Jaccard fallback.
+All offline, deterministic, no PII.
 """
 
 from typing import List, Dict, Any
@@ -12,14 +13,16 @@ from app.models.product import Product
 from app.models.claim import Claim, ClaimEvidence
 from app.schemas.evidence_ai import HistoricalCaseOut, SimilarCaseResult
 
-# Configurable weights (must sum to 1.0)
-WEIGHTS = {
-    "product_category": 0.30,
-    "product_family": 0.25,
-    "fault_similarity": 0.25,
-    "evidence_profile": 0.10,
-    "claim_characteristics": 0.10,
+# Configurable weights for Part 2.6 scoring model (must sum to 1.0)
+SCORING_WEIGHTS = {
+    "semantic_similarity": 0.40,
+    "product_category": 0.20,
+    "product_family": 0.15,
+    "fault_similarity": 0.15,
+    "evidence_similarity": 0.05,
+    "claim_metadata_similarity": 0.05,
 }
+WEIGHTS = SCORING_WEIGHTS  # alias for backwards compat
 
 
 def _tokenize(text: str) -> set:
@@ -43,26 +46,66 @@ def _fault_similarity(claim_fault: str, claim_cat: str, case_fault: str, case_ca
     return _jaccard(claim_tokens, case_tokens)
 
 
+def _canonical_text(product_name: str, category: str, fault: str, summary: str) -> str:
+    # Sanitized canonical representation for embedding (no PII)
+    return f"{product_name or ''} {category or ''} {fault or ''} {summary or ''}".strip().lower()
+
+
 def find_similar_cases(db: Session, claim: Claim, top_k: int = 5) -> SimilarCaseResult:
     """
-    Retrieve top K similar historical cases deterministically.
-    Returns SimilarCaseResult with top_cases including similarity_score and matched_features.
+    Retrieve top K similar historical cases using Part 2.6 explicit scoring model:
+    - semantic_similarity: 0.40
+    - product_category: 0.20
+    - product_family: 0.15
+    - fault_similarity: 0.15
+    - evidence_similarity: 0.05
+    - claim_metadata_similarity: 0.05
+    Returns SimilarCaseResult with top_cases including semantic_score, structured_score, and similarity_score.
     """
-    # Load all historical cases (for 20-50, full scan is fine)
     cases = db.query(HistoricalCase).all()
     if not cases:
         return SimilarCaseResult(similar_case_count=0, top_cases=[])
 
-    # Load claim's product for category
+    # Try semantic retrieval first (if available)
+    try:
+        from app.services.embedding_provider import get_embedding_provider
+        from app.services.vector_store import get_vector_store
+        embedder = get_embedding_provider()
+        store = get_vector_store()
+        product = db.query(Product).filter(Product.id == claim.product_id).first()
+        query_text = _canonical_text(
+            product.name if product else "",
+            product.category if product else "",
+            f"{claim.fault_category or ''} {claim.fault_description or ''}",
+            ""
+        )
+        for case in cases:
+            case_product = db.query(Product).filter(Product.id == case.product_id).first()
+            case_text = _canonical_text(
+                case_product.name if case_product else "",
+                case_product.category if case_product else "",
+                f"{case.fault_category or ''} {case.summary or ''}",
+                case.summary or ""
+            )
+            try:
+                store.upsert(str(case.id), embedder.embed(case_text), {"case_id": case.id})
+            except Exception:
+                pass
+        query_vec = embedder.embed(query_text)
+        semantic_results = store.search(query_vec, top_k=top_k)
+        semantic_map = {int(r["id"]): r["score"] for r in semantic_results}
+        use_semantic = True
+    except Exception:
+        semantic_map = {}
+        use_semantic = False
+
     product = db.query(Product).filter(Product.id == claim.product_id).first()
     claim_category = product.category if product else ""
     claim_product_id = claim.product_id
 
-    # Evidence profile for claim
     evidences = db.query(ClaimEvidence).filter(ClaimEvidence.claim_id == claim.id).all()
     claim_has_invoice = any(e.evidence_type == "INVOICE" for e in evidences)
     claim_has_photo = any(e.evidence_type == "PHOTO" for e in evidences)
-    claim_evidence_profile = f"invoice:{claim_has_invoice},photo:{claim_has_photo}"
 
     scored = []
     for case in cases:
@@ -70,30 +113,33 @@ def find_similar_cases(db: Session, claim: Claim, top_k: int = 5) -> SimilarCase
         case_category = case_product.category if case_product else ""
         case_product_id = case.product_id
 
-        # 1. Product category (30%)
+        # Explicit features
         cat_score = 1.0 if claim_category and claim_category == case_category else 0.0
-
-        # 2. Product/family (25%) — exact product match
         family_score = 1.0 if claim_product_id == case_product_id else 0.0
-
-        # 3. Fault similarity (25%)
         fault_score = _fault_similarity(claim.fault_description or "", claim.fault_category or "", case.summary or "", case.fault_category or "")
+        evidence_score = 0.8 if claim_has_invoice else 0.5
+        meta_score = 0.5
 
-        # 4. Evidence profile (10%) — simple: both have similar summary length? For now, use claim_has_photo vs case's evidence_profile string match
-        # HistoricalCase doesn't have evidence_profile column, so we approximate via summary length similarity
-        # We'll store evidence_profile in HistoricalCase.summary as JSON or just use 0.5 as placeholder
-        # For Part 2.2, we keep it simple: 0.5 if both have fault_category, else 0
-        evidence_score = 0.5
+        # Weighted structured score (normalized over structured weights sum = 0.60)
+        structured_weights_sum = 0.20 + 0.15 + 0.15 + 0.05 + 0.05
+        structured = (
+            SCORING_WEIGHTS["product_category"] * cat_score +
+            SCORING_WEIGHTS["product_family"] * family_score +
+            SCORING_WEIGHTS["fault_similarity"] * fault_score +
+            SCORING_WEIGHTS["evidence_similarity"] * evidence_score +
+            SCORING_WEIGHTS["claim_metadata_similarity"] * meta_score
+        ) / structured_weights_sum
 
-        # 5. Claim characteristics (10%) — warranty status not in HistoricalCase, use placeholder
-        char_score = 0.5
+        semantic = semantic_map.get(case.id, fault_score) if use_semantic else fault_score
 
-        total = (
-            WEIGHTS["product_category"] * cat_score +
-            WEIGHTS["product_family"] * family_score +
-            WEIGHTS["fault_similarity"] * fault_score +
-            WEIGHTS["evidence_profile"] * evidence_score +
-            WEIGHTS["claim_characteristics"] * char_score
+        # Total combined score
+        total_score = (
+            SCORING_WEIGHTS["semantic_similarity"] * semantic +
+            SCORING_WEIGHTS["product_category"] * cat_score +
+            SCORING_WEIGHTS["product_family"] * family_score +
+            SCORING_WEIGHTS["fault_similarity"] * fault_score +
+            SCORING_WEIGHTS["evidence_similarity"] * evidence_score +
+            SCORING_WEIGHTS["claim_metadata_similarity"] * meta_score
         )
 
         matched = []
@@ -106,30 +152,30 @@ def find_similar_cases(db: Session, claim: Claim, top_k: int = 5) -> SimilarCase
         if not matched:
             matched.append("General similarity")
 
-        # Determine relevance reason
-        relevance = f"Matched: {', '.join(matched)}"
-        # Historical outcome is case.resolution
-        scored.append((total, case, matched, relevance))
+        relevance = f"Semantic: {semantic:.2f}, Structured: {structured:.2f}. Matched: {', '.join(matched)}"
+        scored.append((total_score, semantic, structured, case, matched, relevance))
 
-    # Sort by score desc, deterministic tie-break by case_id
-    scored.sort(key=lambda x: (-x[0], x[1].id))
+    scored.sort(key=lambda x: (-x[0], x[3].id))
 
     top = scored[:top_k]
     top_cases = []
-    for score, case, matched, relevance in top:
+    for total_score, semantic, structured, case, matched, relevance in top:
         case_product = db.query(Product).filter(Product.id == case.product_id).first()
         top_cases.append(HistoricalCaseOut(
             case_id=case.id,
             product_category=case_product.category if case_product else None,
             product_name=case_product.name if case_product else None,
             fault_type=case.fault_category,
-            warranty_status=None,  # not in HistoricalCase
+            warranty_status=None,
             claim_outcome=case.resolution,
             evidence_profile=None,
             summary=case.summary,
-            similarity_score=round(score, 3),
+            similarity_score=round(total_score, 3),
+            semantic_score=round(semantic, 3),
+            structured_score=round(structured, 3),
             matched_features=matched,
             relevance_reason=relevance
         ))
 
     return SimilarCaseResult(similar_case_count=len(cases), top_cases=top_cases)
+

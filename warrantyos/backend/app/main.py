@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import get_settings
 from app.core.database import Base, engine
 from app import models  # noqa: F401  (import registers all tables on Base.metadata)
-from app.routers import auth, system, claims, admin_claims, products, ai, reviews
+from app.routers import auth, system, claims, admin_claims, products, ai, reviews, evaluation
 
 settings = get_settings()
 
@@ -57,3 +57,4 @@ app.include_router(admin_claims.router)
 app.include_router(products.router)
 app.include_router(ai.router)
 app.include_router(reviews.router)
+app.include_router(evaluation.router)

@@ -170,26 +170,53 @@ def get_executions_admin(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin", "support")),
 ):
-    from app.models.claim import AIExecution
+    from app.models.claim import AIExecution, AIExecutionStage
     claim = _get_claim_or_404(db, claim_id)
     execs = db.query(AIExecution).filter(AIExecution.claim_id == claim_id).order_by(AIExecution.created_at.desc()).all()
-    # Sanitize: only safe fields
+
+    result_execs = []
+    for e in execs:
+        stages_rows = db.query(AIExecutionStage).filter(AIExecutionStage.ai_execution_id == e.id).order_by(AIExecutionStage.id.asc()).all()
+        stage_list = [
+            {
+                "stage_name": s.stage_name,
+                "status": s.status,
+                "duration_ms": s.duration_ms,
+                "error_code": s.error_code,
+                "started_at": s.started_at.isoformat() if s.started_at else None,
+                "completed_at": s.completed_at.isoformat() if s.completed_at else None,
+                "provider": s.provider,
+                "model": s.model,
+            }
+            for s in stages_rows
+        ]
+        result_execs.append({
+            "execution_id": e.execution_id,
+            "status": e.status,
+            "provider": e.provider,
+            "model": e.model,
+            "requested_provider": getattr(e, "requested_provider", e.provider),
+            "actual_provider": getattr(e, "actual_provider", e.provider),
+            "requested_model": getattr(e, "requested_model", e.model),
+            "actual_model": getattr(e, "actual_model", e.model),
+            "fallback_used": bool(getattr(e, "fallback_used", False)),
+            "fallback_reason": getattr(e, "fallback_reason", None),
+            "input_token_count": getattr(e, "input_token_count", None),
+            "output_token_count": getattr(e, "output_token_count", None),
+            "estimated_cost": float(e.estimated_cost) if getattr(e, "estimated_cost", None) is not None else 0.0,
+            "latency_ms": getattr(e, "latency_ms", e.duration_ms),
+            "pipeline_version": e.pipeline_version,
+            "attempt": e.attempt,
+            "duration_ms": e.duration_ms,
+            "requested_at": e.requested_at.isoformat() if e.requested_at else None,
+            "completed_at": e.completed_at.isoformat() if e.completed_at else None,
+            "error_code": e.error_code,
+            "error_message": e.error_message,
+            "stages": stage_list,
+        })
+
     return {
         "claim_id": claim.id,
-        "executions": [
-            {
-                "execution_id": e.execution_id,
-                "status": e.status,
-                "provider": e.provider,
-                "model": e.model,
-                "pipeline_version": e.pipeline_version,
-                "attempt": e.attempt,
-                "duration_ms": e.duration_ms,
-                "requested_at": e.requested_at.isoformat() if e.requested_at else None,
-                "completed_at": e.completed_at.isoformat() if e.completed_at else None,
-                "error_code": e.error_code,
-                "error_message": e.error_message,
-            }
-            for e in execs
-        ],
+        "executions": result_execs,
     }
+

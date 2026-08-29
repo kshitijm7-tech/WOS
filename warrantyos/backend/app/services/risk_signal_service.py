@@ -100,9 +100,11 @@ def generate_risk_signals(db: Session, claim: Claim, normalized: NormalizedEvide
     elif normalized.completeness.overall == "PARTIAL":
         add("INSUFFICIENT_EVIDENCE", "LOW", f"Evidence partially complete, missing {', '.join(normalized.completeness.missing)}", "evidence", 0.6)
 
-    # 11. SERIAL_MISMATCH duplicate check already, add INCONSISTENT_PRODUCT_INFORMATION if serial not found but product requires serial
-    if not claim.serial_id and claim.product_id:
-        # For Part 2.2, we consider missing serial as potential inconsistency, but not high risk
-        pass
+    # 11. OCR Evidence Consistency Signals (Part 2.6)
+    if normalized and normalized.extracted_document:
+        from app.services.evidence_consistency_service import check_evidence_consistency
+        ocr_signals = check_evidence_consistency(db, claim, normalized.extracted_document)
+        signals.extend(ocr_signals)
 
     return signals
+
