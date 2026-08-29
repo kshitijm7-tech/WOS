@@ -33,25 +33,41 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   };
   if (authToken) headers.Authorization = `Bearer ${authToken}`;
 
-  const res = await fetch(`${BASE}${path}`, {
-    headers,
-    ...options,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      headers,
+      ...options,
+    });
+  } catch (err: any) {
+    throw new ApiError(
+      `Cannot connect to API backend at ${BASE}. Please verify your backend server is running and VITE_API_URL is set in Vercel.`,
+      0
+    );
+  }
+
+  // Check if response is HTML (happens when static SPA server captures /api requests)
+  const contentType = res.headers.get("content-type") || "";
+  if (contentType.includes("text/html")) {
+    throw new ApiError(
+      `Backend API server is not connected (received HTML page from ${BASE}${path}). Please set the VITE_API_URL environment variable in your Vercel project settings to your deployed FastAPI backend URL.`,
+      res.status
+    );
+  }
 
   if (!res.ok) {
-    let message = "Something went wrong. Please try again.";
+    let message = `Request failed with status ${res.status}.`;
     try {
       const body = await res.json();
       const detail = body.detail;
       if (typeof detail === "string") message = detail;
       else if (Array.isArray(detail) && detail.length > 0) {
-        // Pydantic validation errors return [{loc, msg, type}]
         message = detail.map((d: { msg?: string }) => d.msg).join("; ");
       } else if (detail) {
         message = JSON.stringify(detail);
       }
     } catch {
-      /* non-JSON error body, keep default message */
+      /* non-JSON error body, keep fallback message */
     }
     throw new ApiError(message, res.status);
   }
@@ -60,6 +76,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (res.status === 204) return undefined as unknown as T;
   return res.json() as Promise<T>;
 }
+
 
 export const api = {
   get: <T>(path: string) => request<T>(path, { method: "GET" }),
