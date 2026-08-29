@@ -63,20 +63,25 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   if (!res.ok) {
     let message = `Request failed with status ${res.status}.`;
-    try {
-      const body = await res.json();
-      const detail = body.detail;
-      if (typeof detail === "string") message = detail;
-      else if (Array.isArray(detail) && detail.length > 0) {
-        message = detail.map((d: { msg?: string }) => d.msg).join("; ");
-      } else if (detail) {
-        message = JSON.stringify(detail);
+    if (res.status === 404 && BASE === "/api") {
+      message = "Backend API server not connected (404). Please set the VITE_API_URL environment variable in your Vercel project settings to your deployed FastAPI backend URL.";
+    } else {
+      try {
+        const body = await res.json();
+        const detail = body.detail;
+        if (typeof detail === "string") message = detail;
+        else if (Array.isArray(detail) && detail.length > 0) {
+          message = detail.map((d: { msg?: string }) => d.msg).join("; ");
+        } else if (detail) {
+          message = JSON.stringify(detail);
+        }
+      } catch {
+        /* non-JSON error body, keep fallback message */
       }
-    } catch {
-      /* non-JSON error body, keep fallback message */
     }
     throw new ApiError(message, res.status);
   }
+
 
   // 204 No Content has no body
   if (res.status === 204) return undefined as unknown as T;
