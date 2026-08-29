@@ -4,7 +4,13 @@
  * attachment logic once /api/auth exists.
  */
 
-const BASE = ((import.meta as any).env?.VITE_API_URL as string) || "/api";
+const rawApiUrl = ((import.meta as any).env?.VITE_API_URL as string)?.trim();
+let BASE = "/api";
+if (rawApiUrl) {
+  const cleanUrl = rawApiUrl.replace(/\/+$/, "");
+  BASE = cleanUrl.endsWith("/api") ? cleanUrl : `${cleanUrl}/api`;
+}
+
 
 
 
